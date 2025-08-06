@@ -1,0 +1,12 @@
+[package]
+name = "fasta-parser"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.5.40", features = ["derive"] }
+crossbeam = "0.8.4"
+memchr = "2.7.5"
+memmap2 = "0.9.5"
+needletail = "0.6.3"
+paraseq = "0.3.9"
