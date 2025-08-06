@@ -6,6 +6,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
     },
+    time::Duration,
 };
 
 use clap::Parser;
@@ -14,7 +15,7 @@ use memmap2::Mmap;
 use paraseq::{
     fasta,
     prelude::{ParallelProcessor, ParallelReader},
-    ProcessError, Record,
+    ProcessError, Record, DEFAULT_MAX_RECORDS,
 };
 
 #[derive(clap::Parser)]
@@ -39,38 +40,31 @@ fn main() {
         .unwrap()
         .size();
 
-    {
-        let start = std::time::Instant::now();
-        needletail(&args.path);
-        let elapsed = start.elapsed();
-        eprintln!(
-            "Needletail {:5.2}s {:>5.2}GB/s",
-            elapsed.as_secs_f32(),
-            size as f32 / elapsed.as_nanos() as f32
-        );
-    }
+    println!("threads\tus\tneedletail\tparaseq");
+
+    let print = |name: &str, e: Duration| {
+        let secs = e.as_secs_f32();
+        let thpt = size as f32 / e.as_nanos() as f32;
+        eprintln!("{name:<15}  {secs:>5.2}s {thpt:>5.2}GB/s",);
+        print!("\t{thpt:>5.2}");
+    };
 
     for t in [6, 5, 4, 3, 2, 1] {
+        print!("{t}");
         eprintln!("Threads: {t}");
         args.threads = t;
 
         let start = std::time::Instant::now();
         mmap(&args);
-        let elapsed = start.elapsed();
-        eprintln!(
-            "Mmap       {:>5.2}s {:>5.2}GB/s",
-            elapsed.as_secs_f32(),
-            size as f32 / elapsed.as_nanos() as f32
-        );
+        print("us", start.elapsed());
 
         let start = std::time::Instant::now();
+        needletail(&args.path);
+        print("Needletail", start.elapsed());
+        let start = std::time::Instant::now();
         paraseq(&args.path, args.threads);
-        let elapsed = start.elapsed();
-        eprintln!(
-            "Paraseq    {:>5.2}s {:>5.2}GB/s",
-            elapsed.as_secs_f32(),
-            size as f32 / elapsed.as_nanos() as f32
-        );
+        print("Paraseq", start.elapsed());
+        println!();
     }
 }
 
@@ -169,8 +163,8 @@ fn paraseq(path: &Path, threads: usize) -> usize {
     let file = std::fs::File::open(&path).unwrap();
     let processor = SeqSum::default();
 
-    // let batch_size = DEFAULT_MAX_RECORDS;
-    let batch_size = 1;
+    let batch_size = DEFAULT_MAX_RECORDS;
+    // let batch_size = 1;
     let reader = fasta::Reader::with_batch_size(file, batch_size).unwrap();
     reader.process_parallel(processor.clone(), threads).unwrap();
 
