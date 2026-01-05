@@ -161,12 +161,12 @@ fn needletail(path: &Path) -> usize {
 
 fn paraseq(path: &Path, threads: usize) -> usize {
     let file = std::fs::File::open(&path).unwrap();
-    let processor = SeqSum::default();
+    let mut processor = SeqSum::default();
 
     let batch_size = DEFAULT_MAX_RECORDS;
     // let batch_size = 1;
     let reader = fasta::Reader::with_batch_size(file, batch_size).unwrap();
-    reader.process_parallel(processor.clone(), threads).unwrap();
+    reader.process_parallel(&mut processor, threads).unwrap();
 
     // assert_eq!(processor.get_num_records(), 2397);
     processor.get_num_records() as usize
@@ -187,8 +187,8 @@ impl SeqSum {
         *self.global_num_records.lock().unwrap()
     }
 }
-impl ParallelProcessor for SeqSum {
-    fn process_record<Rf: Record>(&mut self, record: Rf) -> Result<(), ProcessError> {
+impl<Rf: Record> ParallelProcessor<Rf> for SeqSum {
+    fn process_record(&mut self, record: Rf) -> Result<(), ProcessError> {
         black_box(record);
         self.num_records += 1;
         Ok(())
