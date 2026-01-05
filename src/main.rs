@@ -11,6 +11,11 @@ use std::{
 
 use clap::Parser;
 use crossbeam::channel::{Receiver, Sender};
+use helicase::{
+    config::advanced::DEFAULT_CONFIG,
+    input::{FromFile, FromSlice},
+    Config, ParserOptions,
+};
 use memmap2::Mmap;
 use paraseq::{
     fasta,
@@ -25,14 +30,10 @@ struct Args {
 
     #[clap(default_value = "human-genome.fa")]
     path: PathBuf,
-
-    #[clap(long)]
-    needletail: bool,
 }
 
 fn main() {
     let mut args = Args::parse();
-    args.needletail = true;
 
     let size = std::fs::File::open(&args.path)
         .unwrap()
@@ -45,7 +46,7 @@ fn main() {
     let print = |name: &str, e: Duration| {
         let secs = e.as_secs_f32();
         let thpt = size as f32 / e.as_nanos() as f32;
-        eprintln!("{name:<15}  {secs:>5.2}s {thpt:>5.2}GB/s",);
+        eprintln!("{name:<20}  {secs:>5.2}s {thpt:>5.2}GB/s",);
         print!("\t{thpt:>5.2}");
     };
 
@@ -56,14 +57,45 @@ fn main() {
 
         let start = std::time::Instant::now();
         mmap(&args);
-        print("us", start.elapsed());
+        print("mmap trivial", start.elapsed());
 
         let start = std::time::Instant::now();
-        needletail(&args.path);
-        print("Needletail", start.elapsed());
-        let start = std::time::Instant::now();
-        paraseq(&args.path, args.threads);
-        print("Paraseq", start.elapsed());
+        helicase_mmap::<DEFAULT_CONFIG>(&args);
+        print("mmap helicase dft", start.elapsed());
+
+        if t == 1 {
+            let start = std::time::Instant::now();
+            needletail(&args.path);
+            print("Needletail", start.elapsed());
+
+            let start = std::time::Instant::now();
+            paraseq(&args.path, args.threads);
+            print("Paraseq", start.elapsed());
+
+            let start = std::time::Instant::now();
+            helicase_default(&args.path);
+            print("helicase dft", start.elapsed());
+
+            let start = std::time::Instant::now();
+            helicase_ignore_all(&args.path);
+            print("helicase ignore", start.elapsed());
+
+            let start = std::time::Instant::now();
+            helicase_header_only(&args.path);
+            print("helicase hdr", start.elapsed());
+
+            let start = std::time::Instant::now();
+            helicase_string(&args.path);
+            print("helicase str", start.elapsed());
+
+            let start = std::time::Instant::now();
+            helicase_columnar(&args.path);
+            print("helicase col", start.elapsed());
+
+            let start = std::time::Instant::now();
+            helicase_packed(&args.path);
+            print("helicase pck", start.elapsed());
+        }
         println!();
     }
 }
@@ -147,6 +179,80 @@ fn consumer(receiver: Receiver<Vec<&[u8]>>) -> usize {
         }
     }
     count
+}
+
+fn helicase_mmap<const CONFIG: Config>(args: &Args) {
+    let mmap: Mmap;
+    let data;
+    {
+        let file = std::fs::File::open(&args.path).unwrap();
+        mmap = unsafe { Mmap::map(&file).unwrap() };
+        data = &*mmap;
+    }
+
+    let count = AtomicUsize::new(0);
+
+    std::thread::scope(|scope| {
+        let len = data.len().div_ceil(args.threads);
+
+        for i in 0..args.threads {
+            let start = (i * len).min(data.len());
+            let end = ((i + 1) * len).min(data.len());
+            let count = &count;
+            scope.spawn(move || {
+                let x = helicase::FastaParser::<CONFIG, _>::from_slice(&data[start..end]);
+                let local_count = x.count();
+                count.fetch_add(local_count, Ordering::Relaxed);
+            });
+        }
+    });
+}
+
+fn helicase_default(path: &Path) -> usize {
+    let x = helicase::FastxParser::<DEFAULT_CONFIG>::from_file(path).unwrap();
+    x.count()
+}
+
+fn helicase_header_only(path: &Path) -> usize {
+    const CONFIG: Config = ParserOptions::default().ignore_dna().config();
+    let x = helicase::FastxParser::<CONFIG>::from_file(path).unwrap();
+    x.count()
+}
+
+fn helicase_ignore_all(path: &Path) -> usize {
+    const CONFIG: Config = ParserOptions::default()
+        .ignore_headers()
+        .ignore_dna()
+        .config();
+    let x = helicase::FastxParser::<CONFIG>::from_file(path).unwrap();
+    x.count()
+}
+
+fn helicase_string(path: &Path) -> usize {
+    const CONFIG: Config = ParserOptions::default()
+        .ignore_headers()
+        .dna_string()
+        .config();
+    let x = helicase::FastxParser::<CONFIG>::from_file(path).unwrap();
+    x.count()
+}
+
+fn helicase_columnar(path: &Path) -> usize {
+    const CONFIG: Config = ParserOptions::default()
+        .ignore_headers()
+        .dna_columnar()
+        .config();
+    let x = helicase::FastxParser::<CONFIG>::from_file(path).unwrap();
+    x.count()
+}
+
+fn helicase_packed(path: &Path) -> usize {
+    const CONFIG: Config = ParserOptions::default()
+        .ignore_headers()
+        .dna_packed()
+        .config();
+    let x = helicase::FastxParser::<CONFIG>::from_file(path).unwrap();
+    x.count()
 }
 
 fn needletail(path: &Path) -> usize {

@@ -265,6 +265,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 
 [[package]]
+name = "deko"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4569f587e22c368ffc7734c32f503cdccb446457d67314d9697f0c674040d0f9"
+dependencies = [
+ "flate2",
+ "zstd",
+]
+
+[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -299,6 +309,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "crossbeam",
+ "helicase",
  "memchr",
  "memmap2",
  "needletail",
@@ -338,6 +349,15 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+
+[[package]]
+name = "helicase"
+version = "0.1.0"
+source = "git+https://github.com/imartayan/helicase#30153ae2f75715def2f119fa3bca0190670a6747"
+dependencies = [
+ "deko",
+ "memmap2",
+]
 
 [[package]]
 name = "hermit-abi"
