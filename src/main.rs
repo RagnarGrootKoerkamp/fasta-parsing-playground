@@ -18,7 +18,6 @@ use helicase::{
 };
 use memmap2::Mmap;
 use paraseq::{
-    fasta,
     prelude::{ParallelProcessor, ParallelReader},
     ProcessError, Record, DEFAULT_MAX_RECORDS,
 };
@@ -50,7 +49,7 @@ fn main() {
         print!("\t{thpt:>5.2}");
     };
 
-    for t in [6, 5, 4, 3, 2, 1] {
+    for t in [6, 3, 1] {
         print!("{t}");
         eprintln!("Threads: {t}");
         args.threads = t;
@@ -109,6 +108,10 @@ fn mmap(args: &Args) {
         data = &*mmap;
     }
 
+    let ext = args.path.extension().unwrap();
+    let fasta = ext == "fa" || ext == "fasta" || ext == "fna";
+    let symbol = if fasta { b'>' } else { b'@' };
+
     let count = AtomicUsize::new(0);
 
     std::thread::scope(|scope| {
@@ -120,7 +123,7 @@ fn mmap(args: &Args) {
             let start = (i * len).min(data.len());
             let end = ((i + 1) * len).min(data.len());
             let sender = sender.clone();
-            scope.spawn(move || producer(data, start, end, sender));
+            scope.spawn(move || producer(symbol, data, start, end, sender));
         }
 
         // Spawn consumer threads.
@@ -134,8 +137,14 @@ fn mmap(args: &Args) {
     // assert_eq!(count.into_inner(), 2397);
 }
 
-fn producer<'d>(data: &'d [u8], mut start: usize, slice_end: usize, sender: Sender<Vec<&'d [u8]>>) {
-    if let Some(pos) = memchr::memchr(b'>', &data[start..]) {
+fn producer<'d>(
+    symbol: u8,
+    data: &'d [u8],
+    mut start: usize,
+    slice_end: usize,
+    sender: Sender<Vec<&'d [u8]>>,
+) {
+    if let Some(pos) = memchr::memchr(symbol, &data[start..]) {
         start += pos;
     } else {
         return;
@@ -146,7 +155,7 @@ fn producer<'d>(data: &'d [u8], mut start: usize, slice_end: usize, sender: Send
     let target_batch_len = 1 << 20; // 1MB
 
     loop {
-        let end = match memchr::memchr(b'>', &data[start + 1..]) {
+        let end = match memchr::memchr(symbol, &data[start + 1..]) {
             Some(x) => start + 1 + x,
             None => slice_end,
         };
@@ -190,17 +199,46 @@ fn helicase_mmap<const CONFIG: Config>(args: &Args) {
         data = &*mmap;
     }
 
+    let ext = args.path.extension().unwrap();
+    let fasta = ext == "fa" || ext == "fasta" || ext == "fna";
+    let start = if fasta { b'>' } else { b'@' };
+
     let count = AtomicUsize::new(0);
 
     std::thread::scope(|scope| {
         let len = data.len().div_ceil(args.threads);
 
+        let mut splits = (0..=args.threads)
+            .map(|i| (i * len).min(data.len()))
+            .collect::<Vec<usize>>();
+        for x in &mut splits {
+            if *x == 0 {
+                continue;
+            }
+            if *x >= data.len() {
+                continue;
+            }
+            // find first > or @ preceded by \n after x
+            loop {
+                if let Some(pos) = memchr::memchr(start, &data[*x..]) {
+                    if data[*x + pos - 1] == b'\n' {
+                        *x += pos;
+                        break;
+                    }
+                    *x += pos + 1;
+                } else {
+                    *x = data.len();
+                    break;
+                }
+            }
+        }
+
         for i in 0..args.threads {
-            let start = (i * len).min(data.len());
-            let end = ((i + 1) * len).min(data.len());
+            let start = splits[i];
+            let end = splits[i + 1];
             let count = &count;
             scope.spawn(move || {
-                let x = helicase::FastaParser::<CONFIG, _>::from_slice(&data[start..end]);
+                let x = helicase::FastxParser::<CONFIG>::from_slice(&data[start..end]);
                 let local_count = x.count();
                 count.fetch_add(local_count, Ordering::Relaxed);
             });
@@ -271,7 +309,7 @@ fn paraseq(path: &Path, threads: usize) -> usize {
 
     let batch_size = DEFAULT_MAX_RECORDS;
     // let batch_size = 1;
-    let reader = fasta::Reader::with_batch_size(file, batch_size).unwrap();
+    let reader = paraseq::fastx::Reader::new_with_batch_size(file, batch_size).unwrap();
     reader.process_parallel(&mut processor, threads).unwrap();
 
     // assert_eq!(processor.get_num_records(), 2397);
