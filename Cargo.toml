@@ -10,4 +10,6 @@ memchr = "2.7.5"
 memmap2 = "0.9.5"
 needletail = "0.6.3"
 paraseq = "0.4.7"
-helicase.git = "https://github.com/imartayan/helicase"
+# helicase.git = "https://github.com/imartayan/helicase"
+# helicase = { path = "../forks/helicase/helicase", features = ["paraseq"] }
+helicase = { git = "https://github.com/ragnargrootkoerkamp/helicase", branch = 'paraseq_reader', features = ["paraseq"] }

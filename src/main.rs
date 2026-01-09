@@ -59,6 +59,10 @@ fn main() {
         print("mmap trivial", start.elapsed());
 
         let start = std::time::Instant::now();
+        helicase_reader::<DEFAULT_CONFIG>(&args);
+        print("helicase reader dft", start.elapsed());
+
+        let start = std::time::Instant::now();
         helicase_mmap::<DEFAULT_CONFIG>(&args);
         print("mmap helicase dft", start.elapsed());
 
@@ -188,6 +192,43 @@ fn consumer(receiver: Receiver<Vec<&[u8]>>) -> usize {
         }
     }
     count
+}
+
+fn helicase_reader<const CONFIG: Config>(args: &Args) {
+    let reader =
+        helicase::paraseq_reader::ParallelHelicaseReader::<'_, CONFIG>::new(&args.path, 16);
+
+    #[derive(Clone)]
+    struct Processor<'a> {
+        global_count: &'a AtomicUsize,
+        count: usize,
+    }
+    impl<'a, 'b, const CONFIG: Config>
+        paraseq::parallel::ParallelProcessor<&'b helicase::FastxParser<'b, CONFIG>>
+        for Processor<'a>
+    {
+        fn process_record(
+            &mut self,
+            _record: &helicase::FastxParser<'_, CONFIG>,
+        ) -> Result<(), ProcessError> {
+            self.count += 1;
+            Ok(())
+        }
+        fn on_thread_complete(&mut self) -> Result<(), ProcessError> {
+            self.global_count.fetch_add(self.count, Ordering::Relaxed);
+            Ok(())
+        }
+    }
+
+    let global_count = AtomicUsize::new(0);
+    let mut processor = Processor {
+        global_count: &global_count,
+        count: 0,
+    };
+
+    reader
+        .process_parallel(&mut processor, args.threads)
+        .unwrap();
 }
 
 fn helicase_mmap<const CONFIG: Config>(args: &Args) {
